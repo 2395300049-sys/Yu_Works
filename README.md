@@ -1,5 +1,7 @@
 # Yu_Works — 自动化排版与可编辑公式解析器
 
+<img src="assets/app_icon.png" alt="Yu_Works 图标" width="128">
+
 一键将 Markdown / 纯文本 / Word 文档转换为严格排版的 `.docx`，支持 LaTeX 数学公式转 Word 原生公式。
 
 ## 直接下载
@@ -180,7 +182,9 @@ web_app.py             — Web 服务（Flask + PWA）
 Yu_Works.spec           — GUI 版 PyInstaller 打包配置
 Yu_Works-CLI.spec       — CLI 版 PyInstaller 打包配置
 WebApp.spec            — Web 版 PyInstaller 打包配置
-3.ico                  — 应用图标
+assets/app_icon.png    — 应用图标原图（1024×1024）
+assets/app_icon.icns   — macOS 应用图标
+3.ico                  — Windows 应用图标
 Montserrat-Bold.ttf    — 英文标题字体
 ```
 

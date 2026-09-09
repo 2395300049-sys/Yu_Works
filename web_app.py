@@ -8,6 +8,7 @@ PWA 格式转换 Web 应用 —— 手机浏览器打开，添加到主屏幕即
 
 import os
 import re
+import sys
 import tempfile
 import base64
 from io import BytesIO
@@ -15,10 +16,18 @@ from flask import Flask, request, render_template_string, send_file, make_respon
 
 app = Flask(__name__)
 
-# ── 简单图标（144x144 PNG，蓝色底 + 白色 "转" 字）───────────
+# ── PWA 图标 ──────────────────────────────────
 def _make_icon():
-    """生成 144x144 蓝色圆角方块的 PNG 图标。"""
-    # 最小 PNG: 蓝色底色
+    """读取 Yu_Works 头像图标；资源丢失时才使用内置备用图。"""
+    resource_root = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    icon_path = os.path.join(resource_root, 'assets', 'app_icon.png')
+    try:
+        with open(icon_path, 'rb') as icon_file:
+            return icon_file.read()
+    except OSError:
+        pass
+
+    # 备用的最小 PNG：蓝色底色
     import struct, zlib
 
     def chunk(ctype, data):
@@ -62,8 +71,8 @@ self.addEventListener('fetch', e => {
 @app.route('/manifest.json')
 def manifest():
     return {
-        'name': '格式转换',
-        'short_name': '格式转换',
+        'name': 'Yu_Works',
+        'short_name': 'Yu_Works',
         'description': '文本/Word 转严格排版 .docx',
         'start_url': '/',
         'display': 'standalone',

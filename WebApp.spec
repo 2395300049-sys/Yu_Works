@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('3.ico', '.'), ('Montserrat-Bold.ttf', '.'), ('latex_to_omml.py', '.'), ('format_conversion.py', '.'), ('table_processor.py', '.'), ('sanitize.py', '.'), ('template_config.py', '.'), ('style_shell.py', '.'),
+datas = [('3.ico', '.'), ('assets/app_icon.png', 'assets'), ('Montserrat-Bold.ttf', '.'), ('latex_to_omml.py', '.'), ('format_conversion.py', '.'), ('table_processor.py', '.'), ('sanitize.py', '.'), ('template_config.py', '.'), ('style_shell.py', '.'),
     ('core/__init__.py', 'core'), ('core/latex_to_text.py', 'core'), ('core/numbering_engine.py', 'core'), ('core/ai_normalizer.py', 'core'), ('core/docx_reader.py', 'core'), ('core/ole_washer.py', 'core'), ('core/formula_normalize.py', 'core'), ('core/formula_stats.py', 'core'), ('core/report/collector.py', 'core/report'), ('core/report/markdown_report.py', 'core/report'), ('core/scene/schema.py', 'core/scene'), ('core/scene/manager.py', 'core/scene'), ('presets/default_format.json', 'presets'), ('presets/thesis_format.json', 'presets'), ('core/repair.py', 'core'), ('core/escape_features.py', 'core'), ('core/semantics.py', 'core'), ('core/symbols.py', 'core'), ('core/config_manager.py', 'core'), ('core/ole_washer.py', 'core'),
     ('splash.py', '.'), ('docx_renderer.py', '.'), ('analyzer/__init__.py', 'analyzer'), ('analyzer/doc_tree.py', 'analyzer'), ('analyzer/change_tracker.py', 'analyzer'),
     ('md_parser/__init__.py', 'markdown'), ('md_parser/ir.py', 'markdown'), ('md_parser/inline_parser.py', 'markdown'), ('md_parser/block_parser.py', 'markdown'), ('md_parser/word_render.py', 'markdown'), ('md_parser/line_spacing.py', 'markdown'),

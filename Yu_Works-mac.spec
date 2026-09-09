@@ -7,6 +7,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 datas = [
     ('Montserrat-Bold.ttf', '.'),
     ('3.ico', '.'),
+    ('assets/app_icon.png', 'assets'),
     ('presets', 'presets'),
     ('templates', 'templates'),
 ]
@@ -75,6 +76,6 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Yu_Works.app',
-    icon=None,
+    icon='assets/app_icon.icns',
     bundle_identifier='com.yuworks.desktop',
 )

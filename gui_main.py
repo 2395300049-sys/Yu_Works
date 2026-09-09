@@ -14,7 +14,7 @@ import base64
 from datetime import datetime
 
 import customtkinter as ctk
-from tkinter import filedialog
+from tkinter import PhotoImage, filedialog
 from platform_utils import launch_word, open_path
 
 
@@ -304,6 +304,14 @@ class App(ctk.CTk):
 
     # ── 窗口图标 ───────────────────────────────────────────────
     def _set_icon(self):
+        icon_root = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        png_path = os.path.join(icon_root, 'assets', 'app_icon.png')
+        if os.path.exists(png_path):
+            try:
+                self._app_icon_photo = PhotoImage(file=png_path)
+                self.iconphoto(True, self._app_icon_photo)
+            except Exception:
+                pass
         if getattr(sys, '_MEIPASS', ''):
             p = os.path.join(sys._MEIPASS, '3.ico')
             if os.path.exists(p):
