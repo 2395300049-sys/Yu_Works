@@ -14,10 +14,30 @@ from pathlib import Path
 
 _CONFIG_PATH = Path.home() / ".yu_works_config.json"
 
+CHINESE_FONT_SIZES = {
+    "初号": 42.0,
+    "小初": 36.0,
+    "一号": 26.0,
+    "小一": 24.0,
+    "二号": 22.0,
+    "小二": 18.0,
+    "三号": 16.0,
+    "小三": 15.0,
+    "四号": 14.0,
+    "小四": 12.0,
+    "五号": 10.5,
+    "小五": 9.0,
+    "六号": 7.5,
+    "小六": 6.5,
+    "七号": 5.5,
+    "八号": 5.0,
+}
+
 
 DEFAULT_HEADING_SETTINGS = {
     "1": {
         "font_cn": "黑体",
+        "size_name": "小三",
         "size_pt": 15.0,
         "space_before_pt": 40.0,
         "space_after_pt": 20.0,
@@ -25,6 +45,7 @@ DEFAULT_HEADING_SETTINGS = {
     },
     "2": {
         "font_cn": "黑体",
+        "size_name": "四号",
         "size_pt": 14.0,
         "space_before_pt": 24.0,
         "space_after_pt": 6.0,
@@ -32,6 +53,7 @@ DEFAULT_HEADING_SETTINGS = {
     },
     "3": {
         "font_cn": "黑体",
+        "size_name": "小四",
         "size_pt": 12.0,
         "space_before_pt": 12.0,
         "space_after_pt": 6.0,
@@ -77,6 +99,20 @@ def _number(value, *, default: float, minimum: float, maximum: float) -> float:
     return min(maximum, max(minimum, result))
 
 
+def _font_size_name(source: dict, default: dict) -> str:
+    """读取中文字号；旧版数值配置自动转换到最接近的标准字号。"""
+    requested = str(source.get("size_name", "")).strip()
+    if requested in CHINESE_FONT_SIZES:
+        return requested
+    old_size = _number(
+        source.get("size_pt"),
+        default=default["size_pt"],
+        minimum=min(CHINESE_FONT_SIZES.values()),
+        maximum=max(CHINESE_FONT_SIZES.values()),
+    )
+    return min(CHINESE_FONT_SIZES, key=lambda name: abs(CHINESE_FONT_SIZES[name] - old_size))
+
+
 def normalize_heading_settings(settings: dict | None) -> dict:
     """只接受界面公开的标题字段，并限制异常数值。"""
     incoming = settings if isinstance(settings, dict) else {}
@@ -87,12 +123,11 @@ def normalize_heading_settings(settings: dict | None) -> dict:
             continue
         default = DEFAULT_HEADING_SETTINGS[level]
         font_cn = str(source.get("font_cn", default["font_cn"])).strip()
+        size_name = _font_size_name(source, default)
         normalized[level] = {
             "font_cn": font_cn or default["font_cn"],
-            "size_pt": _number(
-                source.get("size_pt"), default=default["size_pt"],
-                minimum=8.0, maximum=72.0,
-            ),
+            "size_name": size_name,
+            "size_pt": CHINESE_FONT_SIZES[size_name],
             "space_before_pt": _number(
                 source.get("space_before_pt"), default=default["space_before_pt"],
                 minimum=0.0, maximum=200.0,

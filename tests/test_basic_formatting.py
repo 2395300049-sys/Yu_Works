@@ -23,6 +23,7 @@ class BasicFormattingTests(unittest.TestCase):
     def test_default_heading_one_matches_required_format(self):
         settings = config_manager.get_heading_settings()["1"]
         self.assertEqual(settings["font_cn"], "黑体")
+        self.assertEqual(settings["size_name"], "小三")
         self.assertEqual(settings["size_pt"], 15.0)
         self.assertEqual(settings["space_before_pt"], 40.0)
         self.assertEqual(settings["space_after_pt"], 20.0)
@@ -37,7 +38,7 @@ class BasicFormattingTests(unittest.TestCase):
         settings = config_manager.get_heading_settings()
         settings["2"].update(
             font_cn="楷体",
-            size_pt=13,
+            size_name="三号",
             space_before_pt=18,
             space_after_pt=9,
             center=True,
@@ -49,10 +50,18 @@ class BasicFormattingTests(unittest.TestCase):
         scene = config_manager.get_active_scene_config()
         heading = scene.styles["heading2"]
         self.assertEqual(heading.font_cn, "楷体")
-        self.assertEqual(heading.size_pt, 13)
+        self.assertEqual(heading.size_pt, 16)
         self.assertEqual(heading.space_before_pt, 18)
         self.assertEqual(heading.space_after_pt, 9)
         self.assertEqual(heading.alignment, "center")
+
+    def test_old_numeric_font_size_is_migrated_to_chinese_size_name(self):
+        config_manager.save_full_config(
+            {"heading_settings": {"1": {"font_cn": "黑体", "size_pt": 15}}}
+        )
+        settings = config_manager.get_heading_settings()["1"]
+        self.assertEqual(settings["size_name"], "小三")
+        self.assertEqual(settings["size_pt"], 15.0)
 
     def test_markdown_heading_one_is_applied_and_no_blank_cover_is_added(self):
         output = Path(self.temp_dir.name) / "heading.docx"

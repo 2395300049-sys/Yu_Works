@@ -15,6 +15,7 @@ import customtkinter as ctk
 from tkinter import PhotoImage, filedialog
 
 from core.config_manager import (
+    CHINESE_FONT_SIZES,
     DEFAULT_HEADING_SETTINGS,
     get_heading_settings,
     save_heading_settings,
@@ -39,6 +40,7 @@ COLORS = {
 }
 
 FONT_OPTIONS = ["黑体", "宋体", "楷体", "仿宋", "微软雅黑"]
+FONT_SIZE_OPTIONS = list(CHINESE_FONT_SIZES)
 
 
 def _get_asset_path(*parts: str) -> str:
@@ -207,7 +209,7 @@ class App(ctk.CTk):
         for index, weight in enumerate(widths):
             grid.grid_columnconfigure(index, weight=weight)
 
-        headers = ["级别", "中文字体", "字号（磅）", "段前（磅）", "段后（磅）", "居中"]
+        headers = ["级别", "中文字体", "字号", "段前（磅）", "段后（磅）", "居中"]
         for column, text in enumerate(headers):
             ctk.CTkLabel(
                 grid,
@@ -240,8 +242,18 @@ class App(ctk.CTk):
             )
             font_menu.grid(row=row_index, column=1, sticky="ew", padx=6, pady=6)
 
-            size_entry = self._number_entry(grid, values["size_pt"])
-            size_entry.grid(row=row_index, column=2, sticky="ew", padx=6, pady=6)
+            size_var = ctk.StringVar(value=values["size_name"])
+            size_menu = ctk.CTkOptionMenu(
+                grid,
+                values=FONT_SIZE_OPTIONS,
+                variable=size_var,
+                fg_color=COLORS["soft"],
+                button_color=COLORS["accent"],
+                button_hover_color=COLORS["accent_hover"],
+                text_color=COLORS["text"],
+                dropdown_fg_color=COLORS["card"],
+            )
+            size_menu.grid(row=row_index, column=2, sticky="ew", padx=6, pady=6)
             before_entry = self._number_entry(grid, values["space_before_pt"])
             before_entry.grid(row=row_index, column=3, sticky="ew", padx=6, pady=6)
             after_entry = self._number_entry(grid, values["space_after_pt"])
@@ -260,7 +272,7 @@ class App(ctk.CTk):
 
             self.heading_widgets[level] = {
                 "font": font_var,
-                "size": size_entry,
+                "size": size_var,
                 "before": before_entry,
                 "after": after_entry,
                 "center": center_var,
@@ -268,7 +280,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             card,
-            text="一级标题固定启用“段前分页”；默认：黑体、小三15磅、居中、段前40磅、段后20磅。",
+            text="一级标题固定启用“段前分页”；默认：黑体、小三、居中、段前40磅、段后20磅。",
             font=("Microsoft YaHei", 11),
             text_color=COLORS["warning"],
         ).pack(anchor="w", padx=20, pady=(10, 8))
@@ -408,18 +420,18 @@ class App(ctk.CTk):
         settings = {}
         for level, widgets in self.heading_widgets.items():
             try:
-                size = float(widgets["size"].get())
                 before = float(widgets["before"].get())
                 after = float(widgets["after"].get())
             except ValueError as exc:
-                raise ValueError(f"{level}级标题的字号、段前、段后必须填写数字") from exc
-            if not 8 <= size <= 72:
-                raise ValueError(f"{level}级标题字号应在 8 到 72 磅之间")
+                raise ValueError(f"{level}级标题的段前、段后必须填写数字") from exc
+            size_name = widgets["size"].get()
+            if size_name not in CHINESE_FONT_SIZES:
+                raise ValueError(f"{level}级标题请选择有效的中文字号")
             if not 0 <= before <= 200 or not 0 <= after <= 200:
                 raise ValueError(f"{level}级标题段前段后应在 0 到 200 磅之间")
             settings[level] = {
                 "font_cn": widgets["font"].get(),
-                "size_pt": size,
+                "size_name": size_name,
                 "space_before_pt": before,
                 "space_after_pt": after,
                 "center": widgets["center"].get(),
@@ -442,8 +454,8 @@ class App(ctk.CTk):
         for level, values in DEFAULT_HEADING_SETTINGS.items():
             widgets = self.heading_widgets[level]
             widgets["font"].set(values["font_cn"])
+            widgets["size"].set(values["size_name"])
             for key, value_key in (
-                ("size", "size_pt"),
                 ("before", "space_before_pt"),
                 ("after", "space_after_pt"),
             ):
