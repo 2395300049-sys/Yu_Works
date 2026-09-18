@@ -11,7 +11,8 @@ class TitleDictionary:
 
         # 基础兜底——中文 / 通用论文惯例标题
         self._default_front_matter = [
-            "摘要", "Abstract", "ABSTRACT", "目录", "参考文献", "致谢", "附录",
+            "摘要", "摘 要", "中文摘要", "英文摘要", "Abstract", "ABSTRACT",
+            "目录", "参考文献", "致谢", "附录",
         ]
         self._default_custom_titles = [
             "个人简历", "勘误页", "勘误", "声明", "申明", "授权书",

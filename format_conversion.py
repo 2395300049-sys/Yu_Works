@@ -190,6 +190,36 @@ def _apply_caption_style(para, config=None):
                 bold=cap_style.bold,
             )
 
+
+def _looks_like_keywords(text):
+    return bool(re.match(
+        r'^\s*(?:关键词|关键字|key\s*words?|keywords?)\s*[：:]',
+        text or '',
+        re.IGNORECASE,
+    ))
+
+
+def _apply_keywords_style(para, config=None):
+    """关键词行与摘要正文空一行，并整行加粗、左对齐。"""
+    normal = config.styles.get("normal") if (config and hasattr(config, "styles")) else None
+    cn_font = getattr(normal, "font_cn", "宋体")
+    en_font = "Times New Roman"
+    size_pt = getattr(normal, "size_pt", 12.0)
+    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    para.paragraph_format.first_line_indent = Cm(0)
+    para.paragraph_format.left_indent = Cm(0)
+    para.paragraph_format.right_indent = Cm(0)
+    para.paragraph_format.space_before = Pt(20)
+    para.paragraph_format.space_after = Pt(0)
+    for run in para.runs:
+        _set_run_font(
+            run,
+            cn_font=cn_font,
+            en_font=en_font,
+            size_pt=size_pt,
+            bold=True,
+        )
+
 def _apply_reference_style(para):
     para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     para.paragraph_format.first_line_indent = Cm(-0.74)
@@ -308,6 +338,18 @@ def convert_text_to_docx(text, output_file, formula_stats=None):
         if block.type == BlockType.FOOTNOTE_DEF:
             continue
 
+        elif block.type == BlockType.PARAGRAPH and _is_abstract_title(block.raw_text):
+            _ensure_output_section(doc, "front")
+            pre_body_kind = "front"
+            _add_heading(
+                doc,
+                block.raw_text,
+                1,
+                config=scene_cfg,
+                global_stats=formula_stats,
+                para_idx=block_idx,
+            )
+
         elif block.type == BlockType.HEADING:
             kind = _target_section_kind("heading", block.raw_text, block.level, body_started=body_started)
             _ensure_output_section(doc, kind)
@@ -346,6 +388,8 @@ def convert_text_to_docx(text, output_file, formula_stats=None):
                     )
             if _looks_like_caption_text(block.raw_text):
                 _apply_caption_style(para, scene_cfg)
+            elif _looks_like_keywords(block.raw_text):
+                _apply_keywords_style(para, scene_cfg)
             doc._yu_works_current_section_has_content = True
 
         elif block.type == BlockType.BLOCKQUOTE:
@@ -437,6 +481,7 @@ def convert_text_to_docx(text, output_file, formula_stats=None):
     _sync_document_styles(doc, scene_cfg)
     _apply_page_setup(doc, scene_cfg)
     _set_section_page_numbering(doc)
+    _enforce_times_new_roman(doc)
     doc.save(output_file)
     return tracker, formula_stats
 
@@ -581,6 +626,104 @@ def _sync_document_styles(doc, scene_cfg):
         _sync_style_font(style, style_cfg, force_black=True)
 
 
+def _enforce_times_new_roman(doc):
+    """确保所有含数字或英文字母的普通文本 run 使用 Times New Roman。"""
+    roots = [doc._element]
+    for section in doc.sections:
+        roots.extend((section.header._element, section.footer._element))
+
+    seen = set()
+    for root in roots:
+        identity = id(root)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        for run_el in root.iter(qn('w:r')):
+            text = ''.join(node.text or '' for node in run_el.iter(qn('w:t')))
+            if not re.search(r'[A-Za-z0-9]', text):
+                continue
+            rpr = run_el.find(qn('w:rPr'))
+            if rpr is None:
+                rpr = OxmlElement('w:rPr')
+                run_el.insert(0, rpr)
+            fonts = rpr.find(qn('w:rFonts'))
+            if fonts is None:
+                fonts = OxmlElement('w:rFonts')
+                rpr.insert(0, fonts)
+            fonts.set(qn('w:ascii'), 'Times New Roman')
+            fonts.set(qn('w:hAnsi'), 'Times New Roman')
+            fonts.set(qn('w:cs'), 'Times New Roman')
+
+
+def _format_native_omml_paragraph(paragraph_el, config=None):
+    """居中原生 OMML；若同段带编号，则以右制表位贴齐版心右侧。"""
+    ppr = paragraph_el.find(qn('w:pPr'))
+    if ppr is None:
+        ppr = OxmlElement('w:pPr')
+        paragraph_el.insert(0, ppr)
+
+    for tag in ('w:ind', 'w:tabs'):
+        old = ppr.find(qn(tag))
+        if old is not None:
+            ppr.remove(old)
+
+    jc = ppr.find(qn('w:jc'))
+    if jc is None:
+        jc = OxmlElement('w:jc')
+        ppr.append(jc)
+
+    visible_text = ''.join(
+        node.text or '' for node in paragraph_el.iter(qn('w:t'))
+    ).strip()
+    has_number = bool(re.search(r'[（(]\s*[0-9]+(?:[.\-–][0-9]+)*\s*[)）]\s*$', visible_text))
+    children = list(paragraph_el)
+    math_indexes = [
+        index for index, child in enumerate(children)
+        if child.tag in (f'{{{_M_NS}}}oMath', f'{{{_M_NS}}}oMathPara')
+    ]
+
+    if not has_number or not math_indexes:
+        jc.set(qn('w:val'), 'center')
+        return
+
+    margin = getattr(getattr(config, 'page_setup', None), 'margin', None)
+    usable_cm = max(
+        12.0,
+        21.0 - float(getattr(margin, 'left_cm', 2.0))
+        - float(getattr(margin, 'right_cm', 2.0)),
+    )
+    usable_twips = int(Cm(usable_cm).twips)
+    tabs = OxmlElement('w:tabs')
+    for value, position in (('center', usable_twips // 2), ('right', usable_twips)):
+        tab = OxmlElement('w:tab')
+        tab.set(qn('w:val'), value)
+        tab.set(qn('w:pos'), str(position))
+        tabs.append(tab)
+    ppr.append(tabs)
+    jc.set(qn('w:val'), 'left')
+
+    def _tab_run():
+        run = OxmlElement('w:r')
+        run.append(OxmlElement('w:tab'))
+        return run
+
+    first_math = math_indexes[0]
+    paragraph_el.insert(first_math, _tab_run())
+
+    children = list(paragraph_el)
+    last_math = max(
+        index for index, child in enumerate(children)
+        if child.tag in (f'{{{_M_NS}}}oMath', f'{{{_M_NS}}}oMathPara')
+    )
+    for index, child in enumerate(children[last_math + 1:], start=last_math + 1):
+        if child.tag != qn('w:r'):
+            continue
+        run_text = ''.join(node.text or '' for node in child.iter(qn('w:t')))
+        if run_text.strip():
+            paragraph_el.insert(index, _tab_run())
+            break
+
+
 def _looks_like_body_start(text):
     raw = (text or "").strip()
     return bool(re.match(r'^第(\d+|[一二三四五六七八九十百千万]+)章', raw))
@@ -596,6 +739,11 @@ def _is_toc_title(text):
     return bool(re.fullmatch(r'(目录|目錄|Contents|TableofContents)', raw, re.IGNORECASE))
 
 
+def _is_abstract_title(text):
+    raw = re.sub(r'\s+', '', text or '')
+    return bool(re.fullmatch(r'(?:中文摘要|英文摘要|摘要|Abstract)', raw, re.IGNORECASE))
+
+
 def _target_section_kind(block_type, text, level=0, source_section_type=None, body_started=False):
     if body_started:
         return "body"
@@ -609,7 +757,7 @@ def _target_section_kind(block_type, text, level=0, source_section_type=None, bo
         return "no_page"
     if block_type == "heading" and _looks_like_body_start(text):
         return "body"
-    if re.match(r'^(摘要|Abstract|ABSTRACT)$', (text or "").strip()):
+    if _is_abstract_title(text):
         return "front"
     return None
 
@@ -893,6 +1041,8 @@ def reformat_docx(input_file, output_file):
                     jc = OxmlElement('w:jc')
                     pPr.append(jc)
                 jc.set(qn('w:val'), 'center')
+            else:
+                _format_native_omml_paragraph(block.source_element, scene_cfg)
             sectPr = dst._body._element.find(qn('w:sectPr'))
             if sectPr is not None:
                 sectPr.addprevious(block.source_element)
@@ -966,9 +1116,19 @@ def reformat_docx(input_file, output_file):
                 cl = Cm(_cfg('references_body', 'left_indent_cm', 0.85))
                 cf = Cm(-_cfg('references_body', 'hanging_indent_cm', 0.85))
             elif block.section_type == 'cover': cf = Cm(0)
-            _add_body(dst, block.text, source_para=block.source_para, config=scene_cfg,
-                      left_indent=cl, first_line_indent=cf,
-                      section_type=block.section_type, global_stats=formula_stats, para_idx=-1)
+            body_para = _add_body(
+                dst,
+                block.text,
+                source_para=block.source_para,
+                config=scene_cfg,
+                left_indent=cl,
+                first_line_indent=cf,
+                section_type=block.section_type,
+                global_stats=formula_stats,
+                para_idx=-1,
+            )
+            if _looks_like_keywords(block.text):
+                _apply_keywords_style(body_para, scene_cfg)
 
 # ── 公式健康度审计报告 ──
     if formula_stats.matched > 0:
@@ -995,6 +1155,7 @@ def reformat_docx(input_file, output_file):
     _sync_document_styles(dst, scene_cfg)
     _apply_page_setup(dst, scene_cfg)
     _set_section_page_numbering(dst)
+    _enforce_times_new_roman(dst)
     dst.save(output_file)
 
     # ── 保存后轻量级 Validation 扫描 ──

@@ -21,8 +21,8 @@ def looks_like_reference_entry_line(text):
 # 分区锚点关键字
 SECTION_ANCHORS: dict[str, list[str]] = {
     "cover": ["学位论文", "博士学位", "硕士学位"],
-    "abstract_cn": ["摘要", "摘 要"],
-    "abstract_en": ["Abstract", "ABSTRACT"],
+    "abstract_cn": ["摘要", "摘 要", "中文摘要"],
+    "abstract_en": ["Abstract", "ABSTRACT", "英文摘要"],
     "toc": ["目录", "目 录"],
     "references": ["参考文献"],
     "errata": ["勘误页", "勘误"],
@@ -83,6 +83,8 @@ _REFERENCE_ENTRY_CLUSTER_MAX_LEN = 240
 
 _FRONT_TITLE_NORMS = {
     "\u6458\u8981",
+    "\u4e2d\u6587\u6458\u8981",
+    "\u82f1\u6587\u6458\u8981",
     "\u6458\u8981\u3002",
     "\u6458\u8981\uff1a",
     "abstract",
@@ -93,7 +95,7 @@ _FRONT_TITLE_NORMS = {
 }
 _RE_FRONT_TITLE_TAIL_MARKS = re.compile(r"[：:;；·•\-—_~\.。…]+$")
 _RE_FRONT_TITLE_PATTERNS = [
-    re.compile(r"^\u6458\u8981(?:[（(][^()（）]{0,8}[)）])?$"),
+    re.compile(r"^(?:\u4e2d\u6587|\u82f1\u6587)?\u6458\u8981(?:[（(][^()（）]{0,8}[)）])?$"),
     re.compile(r"^abstract(?:[（(][^()（）]{0,16}[)）])?$", re.IGNORECASE),
     re.compile(
         r"^(?:\u76ee\u5f55|\u76ee\u9304|contents|tableofcontents)(?:[（(][^()（）]{0,8}[)）])?$",

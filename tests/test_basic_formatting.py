@@ -4,6 +4,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 import core.config_manager as config_manager
@@ -108,6 +109,117 @@ class BasicFormattingTests(unittest.TestCase):
         self.assertNotIn("绪论........1", rendered)
         self.assertIn("第一章 绪论", rendered)
         self.assertIn("这是正文", rendered)
+
+    def test_display_equations_are_centered_and_number_is_right_aligned(self):
+        output = Path(self.temp_dir.name) / "equations.docx"
+        convert_text_to_docx(
+            "$$E=mc^2$$\n\n$$a^2+b^2=c^2\\tag{1}$$",
+            str(output),
+        )
+        doc = Document(output)
+
+        equation_paragraphs = [
+            p for p in doc.paragraphs
+            if p._element.findall('.//' + qn('m:oMath'))
+        ]
+        self.assertEqual(len(equation_paragraphs), 1)
+        self.assertEqual(
+            equation_paragraphs[0].alignment,
+            WD_ALIGN_PARAGRAPH.CENTER,
+        )
+        self.assertEqual(equation_paragraphs[0].paragraph_format.first_line_indent.cm, 0)
+
+        self.assertEqual(len(doc.tables), 1)
+        table = doc.tables[0]
+        middle = table.cell(0, 1).paragraphs[0]
+        number = table.cell(0, 2).paragraphs[0]
+        self.assertEqual(middle.alignment, WD_ALIGN_PARAGRAPH.CENTER)
+        self.assertEqual(number.alignment, WD_ALIGN_PARAGRAPH.RIGHT)
+        self.assertEqual(number.text, "(1)")
+        table_width = table._tbl.tblPr.find(qn('w:tblW'))
+        self.assertEqual(table_width.get(qn('w:type')), 'pct')
+        self.assertEqual(table_width.get(qn('w:w')), '5000')
+        cell_widths = [
+            cell._tc.get_or_add_tcPr().find(qn('w:tcW')).get(qn('w:w'))
+            for cell in table.rows[0].cells
+        ]
+        self.assertEqual(cell_widths, ['750', '3500', '750'])
+        number_run = next(run for run in number.runs if '(1)' in run.text)
+        fonts = number_run._r.get_or_add_rPr().find(qn('w:rFonts'))
+        self.assertEqual(fonts.get(qn('w:ascii')), "Times New Roman")
+
+    def test_abstract_titles_keywords_and_western_font_rules(self):
+        output = Path(self.temp_dir.name) / "abstract.docx"
+        convert_text_to_docx(
+            "中文摘要\n\n摘要正文包含 Test 123。\n\n"
+            "关键词：机械；设计\n\n英文摘要\n\nEnglish Abstract 456.\n\n"
+            "Keywords: machine; design",
+            str(output),
+        )
+        doc = Document(output)
+        paragraphs = {p.text: p for p in doc.paragraphs if p.text.strip()}
+
+        for title in ("中文摘要", "英文摘要"):
+            paragraph = paragraphs[title]
+            self.assertEqual(paragraph.alignment, WD_ALIGN_PARAGRAPH.CENTER)
+            self.assertTrue(paragraph.paragraph_format.page_break_before)
+            self.assertEqual(paragraph.paragraph_format.space_before.pt, 40.0)
+            self.assertEqual(paragraph.paragraph_format.space_after.pt, 20.0)
+
+        for text in ("关键词：机械；设计", "Keywords: machine; design"):
+            paragraph = paragraphs[text]
+            self.assertEqual(paragraph.alignment, WD_ALIGN_PARAGRAPH.LEFT)
+            self.assertEqual(paragraph.paragraph_format.first_line_indent.cm, 0)
+            self.assertEqual(paragraph.paragraph_format.space_before.pt, 20.0)
+            self.assertTrue(all(run.bold for run in paragraph.runs))
+
+        for text in ("摘要正文包含 Test 123。", "English Abstract 456."):
+            paragraph = paragraphs[text]
+            western_runs = [r for r in paragraph.runs if any(ch.isascii() and ch.isalnum() for ch in r.text)]
+            self.assertTrue(western_runs)
+            for run in western_runs:
+                fonts = run._r.get_or_add_rPr().find(qn('w:rFonts'))
+                self.assertEqual(fonts.get(qn('w:ascii')), "Times New Roman")
+                self.assertEqual(fonts.get(qn('w:hAnsi')), "Times New Roman")
+
+    def test_reformat_docx_handles_native_equation_number_and_abstract(self):
+        source = Path(self.temp_dir.name) / "native-source.docx"
+        output = Path(self.temp_dir.name) / "native-output.docx"
+        doc = Document()
+        doc.add_paragraph("中文摘要")
+        doc.add_paragraph("摘要正文 ABC 123。")
+        doc.add_paragraph("关键词：测试；排版")
+        equation = doc.add_paragraph()
+        math = OxmlElement('m:oMath')
+        math_run = OxmlElement('m:r')
+        math_text = OxmlElement('m:t')
+        math_text.text = 'x=1'
+        math_run.append(math_text)
+        math.append(math_run)
+        equation._p.append(math)
+        equation.add_run('(2)')
+        doc.save(source)
+
+        reformat_docx(str(source), str(output))
+        rendered = Document(output)
+        title = next(p for p in rendered.paragraphs if p.text == "中文摘要")
+        keywords = next(p for p in rendered.paragraphs if p.text == "关键词：测试；排版")
+        native = next(
+            p for p in rendered.paragraphs
+            if p._element.findall('.//' + qn('m:oMath'))
+        )
+
+        self.assertEqual(title.alignment, WD_ALIGN_PARAGRAPH.CENTER)
+        self.assertTrue(title.paragraph_format.page_break_before)
+        self.assertEqual(keywords.alignment, WD_ALIGN_PARAGRAPH.LEFT)
+        self.assertEqual(keywords.paragraph_format.space_before.pt, 20.0)
+        tabs = native._element.get_or_add_pPr().find(qn('w:tabs'))
+        self.assertIsNotNone(tabs)
+        values = [tab.get(qn('w:val')) for tab in tabs]
+        self.assertEqual(values, ['center', 'right'])
+        number_run = next(run for run in native.runs if '(2)' in run.text)
+        fonts = number_run._r.get_or_add_rPr().find(qn('w:rFonts'))
+        self.assertEqual(fonts.get(qn('w:ascii')), "Times New Roman")
 
 
 if __name__ == "__main__":

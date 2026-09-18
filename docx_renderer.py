@@ -357,7 +357,7 @@ def _add_heading(doc, text, level, alignment=None, source_para=None,
     elif h_style:
         para.paragraph_format.alignment = _alignment_value(h_style.alignment, WD_ALIGN_PARAGRAPH.LEFT)
     elif re.match(r'^第(\d+|[一二三四五六七八九十]+)章', text.strip()) or \
-         re.match(r'^(摘要|Abstract|ABSTRACT|参考文献|致谢|附录)', text.strip()):
+         re.match(r'^(中文摘要|英文摘要|摘\s*要|Abstract|ABSTRACT|参考文献|致谢|附录)', text.strip()):
         para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
         para.paragraph_format.page_break_before = True
     else:
@@ -618,16 +618,29 @@ def _add_code_line(doc, line_text, source_para=None, config=None,
 # ── 公式编号表格夹具 ──────────────────────────────────────────────
 
 def _add_equation_table(doc, text, config=None, global_stats=None, para_idx=-1):
-    """构建一个完全隐形的 1×3 表格，公式居中、编号右对齐。无编号则降级为普通正文。"""
-    from docx.enum.table import WD_TABLE_ALIGNMENT
+    """渲染独立公式：公式严格居中，存在编号时编号贴齐版心右侧。"""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    clean_text = text.strip().strip('$').strip()
+    clean_text = text.strip()
+    clean_text = re.sub(r'^\$\$\s*|\s*\$\$$', '', clean_text, flags=re.DOTALL)
+    clean_text = re.sub(r'^\\\[\s*|\s*\\\]$', '', clean_text, flags=re.DOTALL)
     match = re.search(
         r'^(.*?)\s*(?:[\(\（]([0-9\-–\.]+)[\)\）]|\\tag\s*\{?([0-9\-–\.]+)\}?)\s*$',
         clean_text, flags=re.DOTALL)
     if not match:
-        return _add_body(doc, text, global_stats=global_stats, para_idx=para_idx)
+        formula_part = clean_text.strip()
+        para = doc.add_paragraph()
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_format(para, line_spacing_pt=20, first_line_indent=Cm(0))
+        para.paragraph_format.left_indent = Cm(0)
+        para.paragraph_format.right_indent = Cm(0)
+        para.add_run(f"${formula_part}$")
+        if _HAS_OMML:
+            replace_latex_with_omml(
+                para, global_stats=global_stats, para_idx=para_idx
+            )
+        _mark_section_content(doc)
+        return para
 
     formula_part = match.group(1).strip()
     num_val = match.group(2) if match.group(2) else match.group(3)
@@ -636,44 +649,47 @@ def _add_equation_table(doc, text, config=None, global_stats=None, para_idx=-1):
         formula_part = f"${formula_part}$"
 
     table = doc.add_table(rows=1, cols=3)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
+    tbl_pr = table._tbl.tblPr
+    tbl_width = tbl_pr.find(qn('w:tblW'))
+    if tbl_width is None:
+        tbl_width = OxmlElement('w:tblW')
+        tbl_pr.insert(0, tbl_width)
+    tbl_width.set(qn('w:type'), 'pct')
+    tbl_width.set(qn('w:w'), '5000')
+    layout = OxmlElement('w:tblLayout')
+    layout.set(qn('w:type'), 'fixed')
+    tbl_pr.append(layout)
 
-    widths = [Cm(2.2), Cm(10.2), Cm(2.2)]
-    for i, w in enumerate(widths):
-        table.columns[i].width = w
-        table.rows[0].cells[i].width = w
+    for cell, percent in zip(table.rows[0].cells, ('750', '3500', '750')):
+        cell_width = cell._tc.get_or_add_tcPr().find(qn('w:tcW'))
+        cell_width.set(qn('w:type'), 'pct')
+        cell_width.set(qn('w:w'), percent)
 
-    tblPr = table._tbl.tblPr
-    old = tblPr.find(qn('w:tblBorders'))
-    if old is not None:
-        tblPr.remove(old)
-    tblBorders = OxmlElement('w:tblBorders')
+    old_borders = tbl_pr.find(qn('w:tblBorders'))
+    if old_borders is not None:
+        tbl_pr.remove(old_borders)
+    borders = OxmlElement('w:tblBorders')
     for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
         border = OxmlElement(f'w:{edge}')
         border.set(qn('w:val'), 'none')
-        tblBorders.append(border)
-    tblPr.append(tblBorders)
+        borders.append(border)
+    tbl_pr.append(borders)
 
-    # 中间单元格：公式居中
-    cell_mid = table.rows[0].cells[1]
-    p_mid = cell_mid.paragraphs[0]
-    p_mid.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_format(p_mid, line_spacing_pt=20, first_line_indent=Cm(0))
-    if not formula_part.startswith('$'):
-        formula_part = f"${formula_part}$"
-    p_mid.add_run(formula_part)
+    middle = table.cell(0, 1).paragraphs[0]
+    middle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_format(middle, line_spacing_pt=20, first_line_indent=Cm(0))
+    middle.add_run(formula_part)
     if _HAS_OMML:
-        replace_latex_with_omml(p_mid, global_stats=global_stats, para_idx=para_idx)
+        replace_latex_with_omml(middle, global_stats=global_stats, para_idx=para_idx)
 
-    # 右侧单元格：编号右对齐
-    cell_right = table.rows[0].cells[2]
-    p_right = cell_right.paragraphs[0]
-    p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _set_para_format(p_right, line_spacing_pt=20, first_line_indent=Cm(0))
+    number_para = table.cell(0, 2).paragraphs[0]
+    number_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _set_para_format(number_para, line_spacing_pt=20, first_line_indent=Cm(0))
     num_font = getattr(config, "number_font_name", "Times New Roman") if config else "Times New Roman"
     num_size = getattr(config, "number_font_size_pt", 10.5) if config else 10.5
-    run_num = p_right.add_run(num_part)
+    run_num = number_para.add_run(num_part)
     _set_run_font(run_num, cn_font='宋体', en_font=num_font, size_pt=num_size)
 
-    return p_mid
+    _mark_section_content(doc)
+    return middle

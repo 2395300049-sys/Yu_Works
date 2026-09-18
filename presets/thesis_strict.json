@@ -83,7 +83,7 @@
     },
     "code_block": {
       "font_cn": "宋体",
-      "font_en": "Consolas",
+      "font_en": "Times New Roman",
       "size_pt": 10.5,
       "bold": false,
       "italic": false,
@@ -133,6 +133,9 @@
       "学位论文版权使用授权书",
       "声明",
       "摘要",
+      "摘 要",
+      "中文摘要",
+      "英文摘要",
       "Abstract",
       "ABSTRACT",
       "目录",
