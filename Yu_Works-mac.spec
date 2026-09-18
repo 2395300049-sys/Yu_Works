@@ -8,8 +8,7 @@ datas = [
     ('Montserrat-Bold.ttf', '.'),
     ('3.ico', '.'),
     ('assets/app_icon.png', 'assets'),
-    ('presets', 'presets'),
-    ('templates', 'templates'),
+    ('presets/thesis_strict.json', 'presets'),
 ]
 binaries = []
 datas += collect_data_files('docx')
@@ -23,9 +22,7 @@ _docx_package = Path(docx.__file__).resolve().parent
 datas.append((str(_docx_package / 'parts' / '__init__.py'), 'docx/parts'))
 hiddenimports = [
     'olefile',
-    'ai_assist.ai_chat_panel',
-    'ai_assist.settings_dialog',
-    'core.clone_engine.api',
+    'lxml',
 ]
 for package in ('customtkinter', 'tkinterdnd2'):
     package_data, package_binaries, package_hiddenimports = collect_all(package)
@@ -42,7 +39,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['flask', 'requests'],
     noarchive=False,
     optimize=0,
 )

@@ -269,7 +269,7 @@ def _copy_runs(para, source_para, cn_font, en_font, size_pt, default_bold,
     """
 
     从 source_para 逐 run 复制到 para，保留原有的 bold/italic/underline，
-    仅替换字体名和字号。Layer 2 模式下跳过硬编码字体，让模板 DNA 接管。
+    并应用基础排版字体和字号。
 
     """
 
@@ -318,10 +318,8 @@ def _copy_runs(para, source_para, cn_font, en_font, size_pt, default_bold,
 
             run.underline = src_run.underline
 
-        # Layer 2 模式下跳过硬编码字体，让模板 DNA 接管
-        if config is None or getattr(config, 'layer_mode', 3) != 2:
-            _set_run_font(run, cn_font=cn_font, en_font=en_font,
-                          size_pt=size_pt, bold=run.bold)
+        _set_run_font(run, cn_font=cn_font, en_font=en_font,
+                      size_pt=size_pt, bold=run.bold)
 
     return para
 
@@ -335,64 +333,43 @@ def _add_heading(doc, text, level, alignment=None, source_para=None,
 
                  extra_prefix='', config=None, global_stats=None, para_idx=-1):
 
-    """
-
-    添加一级 / 二级 / 三级标题。
-
-    - Layer 2（模板模式）：赋 Heading 样式，由模板 DNA 完全接管
-    - Layer 3（兜底模式）：硬编码宋体/TNR/固定行距
-
-    """
+    """添加一级、二级或三级标题并套用当前基础排版设置。"""
 
     para = doc.add_paragraph()
 
     from core.constants import STYLE_MAP
     heading_style = STYLE_MAP.get(f"heading{level}")
 
-    is_layer2 = (config is not None and getattr(config, 'layer_mode', None) == 2)
     h_style = config.styles.get(f"heading{level}") if (config and hasattr(config, 'styles')) else None
     _h_cn = h_style.font_cn if h_style else '宋体'
     _h_en = h_style.font_en if h_style else 'Times New Roman'
     _h_sz = h_style.size_pt if h_style else {1: 16, 2: 14, 3: 12}.get(level, 12)
     _h_bold = h_style.bold if h_style else True
 
-    # ── Layer 2：仅赋样式，不做段落格式硬编码 ──
-    if is_layer2:
-        if heading_style:
-            try:
-                para.style = doc.styles[heading_style]
-                _ = para.style.style_id
-            except KeyError:
-                pass
+    line_spacing = getattr(h_style, 'line_spacing_pt', 20) if h_style else 20
+    first_indent = getattr(h_style, 'first_line_indent_cm', 0.0) if h_style else 0.0
+    _set_para_format(para, line_spacing_pt=line_spacing, first_line_indent=Cm(first_indent))
+    para.paragraph_format.space_before = Pt(getattr(h_style, 'space_before_pt', 10.0 if level in (1, 2) else 4.0))
+    para.paragraph_format.space_after = Pt(getattr(h_style, 'space_after_pt', 10.0 if level in (1, 2) else 4.0))
+
+    if alignment is not None:
+        para.paragraph_format.alignment = alignment
+    elif h_style:
+        para.paragraph_format.alignment = _alignment_value(h_style.alignment, WD_ALIGN_PARAGRAPH.LEFT)
+    elif re.match(r'^第(\d+|[一二三四五六七八九十]+)章', text.strip()) or \
+         re.match(r'^(摘要|Abstract|ABSTRACT|参考文献|致谢|附录)', text.strip()):
+        para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        para.paragraph_format.page_break_before = True
     else:
-        line_spacing = getattr(h_style, 'line_spacing_pt', 20) if h_style else 20
-        first_indent = getattr(h_style, 'first_line_indent_cm', 0.0) if h_style else 0.0
-        _set_para_format(para, line_spacing_pt=line_spacing, first_line_indent=Cm(first_indent))
-        para.paragraph_format.space_before = Pt(getattr(h_style, 'space_before_pt', 10.0 if level in (1, 2) else 4.0))
-        para.paragraph_format.space_after = Pt(getattr(h_style, 'space_after_pt', 10.0 if level in (1, 2) else 4.0))
+        para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    _apply_paragraph_controls(para, h_style)
 
-        if alignment is not None:
-            para.paragraph_format.alignment = alignment
-        elif h_style:
-            para.paragraph_format.alignment = _alignment_value(h_style.alignment, WD_ALIGN_PARAGRAPH.LEFT)
-        elif re.match(r'^第(\d+|[一二三四五六七八九十]+)章', text.strip()) or \
-             re.match(r'^(摘要|Abstract|ABSTRACT|目录|参考文献|致谢|附录)', text.strip()):
-            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            para.paragraph_format.page_break_before = True
-        else:
-            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        _apply_paragraph_controls(para, h_style)
-        if getattr(doc, '_yu_works_suppress_next_heading_page_break', False):
-            _apply_paragraph_controls(para, None, page_break_before=False)
-            doc._yu_works_suppress_next_heading_page_break = False
-
-    # ── 以下逻辑 Layer 2 / Layer 3 共用 ──
     title_text = text.strip()
     title_text = re.sub(r'\*\*', '', title_text)  # 标题全段加粗，** 符号多余
 
     use_native = (heading_style is not None and extra_prefix == '')
 
-    if use_native and not is_layer2:
+    if use_native:
         try:
             para.style = doc.styles[heading_style]
             _ = para.style.style_id
@@ -403,23 +380,20 @@ def _add_heading(doc, text, level, alignment=None, source_para=None,
 
     if extra_prefix:
         pre_run = para.add_run(extra_prefix)
-        if not is_layer2:
-            _set_run_font(pre_run, cn_font=_h_cn, en_font=_h_en,
-                          size_pt=_h_sz, bold=_h_bold)
+        _set_run_font(pre_run, cn_font=_h_cn, en_font=_h_en,
+                      size_pt=_h_sz, bold=_h_bold)
 
     is_cleaned_native = use_native and title_text != text.strip()
 
     if source_para is not None and not is_cleaned_native:
         _copy_runs(para, source_para, _h_cn, _h_en, _h_sz, True, config=config)
-        if not is_layer2:
-            for run_obj in para.runs:
-                _set_run_font(run_obj, cn_font=_h_cn, en_font=_h_en,
-                              size_pt=_h_sz, bold=_h_bold)
+        for run_obj in para.runs:
+            _set_run_font(run_obj, cn_font=_h_cn, en_font=_h_en,
+                          size_pt=_h_sz, bold=_h_bold)
     else:
         run = para.add_run(title_text)
-        if not is_layer2:
-            _set_run_font(run, cn_font=_h_cn, en_font=_h_en,
-                          size_pt=_h_sz, bold=_h_bold)
+        _set_run_font(run, cn_font=_h_cn, en_font=_h_en,
+                      size_pt=_h_sz, bold=_h_bold)
 
     if _HAS_OMML:
         replace_latex_with_omml(para, global_stats=global_stats, para_idx=para_idx)
@@ -435,60 +409,38 @@ def _add_body(doc, text, alignment=None, left_indent=None,
 
     """
 
-    添加正文段落。Layer 2 仅挂载 Normal 样式，不硬编码字体格式。
-    section_type: 分区类型 (body / references / toc / cover 等)
+    添加正文段落。section_type 用于区分正文和参考文献。
     """
 
     first = first_line_indent if first_line_indent is not None else Cm(0.85)
 
     para = doc.add_paragraph()
 
-    is_layer2 = (config is not None and getattr(config, 'layer_mode', None) == 2)
     style_key = 'references_body' if section_type == 'references' else 'normal'
     b_style = config.styles.get(style_key) if (config and hasattr(config, 'styles')) else None
     _b_cn = b_style.font_cn if b_style else '宋体'
     _b_en = b_style.font_en if b_style else 'Times New Roman'
     _b_sz = b_style.size_pt if b_style else 12
 
-    # ── Layer 2：仅挂载样式 ──
-    if is_layer2:
-        target_style = 'Normal'
-        if section_type == 'references':
-            for s_name in ['参考文献', 'Bibliography', 'List Paragraph']:
-                if s_name in doc.styles:
-                    target_style = s_name
-                    break
-        try:
-            para.style = doc.styles[target_style]
-            _ = para.style.style_id
-        except KeyError:
-            pass
-
-        if section_type == 'references' and target_style == 'Normal':
-            para.paragraph_format.left_indent = Cm(0.85)
-            para.paragraph_format.first_line_indent = Cm(-0.85)
+    if b_style:
+        from core.advanced_formatter import TypographyEngine
+        TypographyEngine.apply_paragraph_style(para, b_style)
     else:
-        # ── Layer 3：硬编码段落格式 ──
-        if b_style:
-            from core.advanced_formatter import TypographyEngine
-            TypographyEngine.apply_paragraph_style(para, b_style)
-        else:
-            _set_para_format(para, line_spacing_pt=20, first_line_indent=first)
+        _set_para_format(para, line_spacing_pt=20, first_line_indent=first)
 
-        if alignment is not None:
-            para.paragraph_format.alignment = alignment
-        elif b_style:
-            para.paragraph_format.alignment = _alignment_value(b_style.alignment)
-        else:
-            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    if alignment is not None:
+        para.paragraph_format.alignment = alignment
+    elif b_style:
+        para.paragraph_format.alignment = _alignment_value(b_style.alignment)
+    else:
+        para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-        if left_indent is not None:
-            para.paragraph_format.left_indent = left_indent
-        if first_line_indent is not None:
-            para.paragraph_format.first_line_indent = first_line_indent
-        _apply_paragraph_controls(para, b_style)
+    if left_indent is not None:
+        para.paragraph_format.left_indent = left_indent
+    if first_line_indent is not None:
+        para.paragraph_format.first_line_indent = first_line_indent
+    _apply_paragraph_controls(para, b_style)
 
-    # ── 以下逻辑 Layer 2 / Layer 3 共用 ──
     # 保留原列表样式
     if style_name and 'list' in style_name.lower():
         try:
@@ -500,9 +452,8 @@ def _add_body(doc, text, alignment=None, left_indent=None,
     # 自动编号前缀（如有）
     if extra_prefix:
         pre_run = para.add_run(extra_prefix)
-        if not is_layer2:
-            _set_run_font(pre_run, cn_font=_b_cn, en_font=_b_en,
-                          size_pt=_b_sz, bold=True)
+        _set_run_font(pre_run, cn_font=_b_cn, en_font=_b_en,
+                      size_pt=_b_sz, bold=True)
 
     if source_para is not None:
 
@@ -527,14 +478,10 @@ def _add_body(doc, text, alignment=None, left_indent=None,
                 parts = full_text.split(delim, 1)
 
                 r1 = para.add_run(parts[0] + delim)
-                if not is_layer2:
-                    _set_run_font(r1, cn_font=_b_cn, en_font=_b_en, size_pt=_b_sz, bold=True)
-                else:
-                    r1.bold = True
+                _set_run_font(r1, cn_font=_b_cn, en_font=_b_en, size_pt=_b_sz, bold=True)
 
                 r2 = para.add_run(parts[1].strip())
-                if not is_layer2:
-                    _set_run_font(r2, cn_font=_b_cn, en_font=_b_en, size_pt=_b_sz, bold=False)
+                _set_run_font(r2, cn_font=_b_cn, en_font=_b_en, size_pt=_b_sz, bold=False)
             else:
                 # 无冒号全段加粗：整体降级，防止伪装成标题
                 _copy_runs(para, source_para, _b_cn, _b_en, _b_sz, False, config=config)
@@ -554,12 +501,8 @@ def _add_body(doc, text, alignment=None, left_indent=None,
                 continue
             run = para.add_run(part)
             is_bold = (i % 2 != 0)
-
-            if not is_layer2:
-                _set_run_font(run, cn_font=_b_cn, en_font=_b_en,
-                              size_pt=_b_sz, bold=is_bold)
-            else:
-                run.bold = is_bold
+            _set_run_font(run, cn_font=_b_cn, en_font=_b_en,
+                          size_pt=_b_sz, bold=is_bold)
 
     # 将段落中的 $...$ LaTeX 转为 OMML 公式
     if _HAS_OMML:
@@ -611,7 +554,6 @@ def _add_cover_page(doc, title=''):
     doc._yu_works_current_section_has_content = False
     doc._yu_works_front_section_started = False
     doc._yu_works_body_section_started = False
-    doc._yu_works_suppress_next_heading_page_break = True
 
 def _add_code_line(doc, line_text, source_para=None, config=None,
                    global_stats=None, para_idx=-1):

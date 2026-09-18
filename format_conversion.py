@@ -31,7 +31,7 @@ from docx import Document
 
 from docx.shared import Pt, Cm, RGBColor
 
-from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from docx.oxml.ns import qn
 
@@ -66,7 +66,7 @@ from core.scene.schema import SceneConfig
 # ── 从 docx_renderer 导入底层渲染函数 ──
 from docx_renderer import (_set_run_font, _set_para_format, _copy_runs,
                             _strip_heading_prefix, _add_heading, _add_body,
-                            _add_cover_page, _add_code_line, _HAS_OMML,
+                            _add_code_line, _HAS_OMML,
                             replace_latex_with_omml,
                             _apply_table_borders)
 
@@ -227,7 +227,7 @@ def _detect_suspicious_vars(text):
     return results
 
 # ---------------------------------------------------------------------------
-# 文本清洗与 AI 归一化管线 (DeepSeek, 豆包, ChatGPT 等)
+# 文本清洗与格式归一化管线
 # ---------------------------------------------------------------------------
 
 # 核心排版主引擎
@@ -288,12 +288,23 @@ def convert_text_to_docx(text, output_file, formula_stats=None):
 
     # ── Stage 2: AST 结构化渲染 ──
     doc = Document()
-    _add_cover_page(doc, title="")
+    doc._yu_works_section_kinds = ["body"]
+    doc._yu_works_current_section_has_content = False
     body_started = False
-    pre_body_kind = "no_page"
+    pre_body_kind = "body"
     references_started = False
+    skipping_toc = False
 
     for block_idx, block in enumerate(blocks):
+        if block.type == BlockType.HEADING:
+            if _is_toc_title(block.raw_text):
+                skipping_toc = True
+                continue
+            if skipping_toc and block.level == 1:
+                skipping_toc = False
+        if skipping_toc:
+            continue
+
         if block.type == BlockType.FOOTNOTE_DEF:
             continue
 
@@ -580,12 +591,17 @@ def _looks_like_no_page_heading(text):
     return bool(re.match(r'^(原创性声明|学位论文版权使用授权书|声明)$', raw))
 
 
+def _is_toc_title(text):
+    raw = re.sub(r'\s+', '', text or '')
+    return bool(re.fullmatch(r'(目录|目錄|Contents|TableofContents)', raw, re.IGNORECASE))
+
+
 def _target_section_kind(block_type, text, level=0, source_section_type=None, body_started=False):
     if body_started:
         return "body"
     if source_section_type in {"body", "references", "acknowledgment", "appendix", "resume"}:
         return "body"
-    if source_section_type in {"abstract_cn", "abstract_en", "toc"}:
+    if source_section_type in {"abstract_cn", "abstract_en"}:
         return "front"
     if source_section_type in {"cover", "pre_body"}:
         return "no_page"
@@ -593,7 +609,7 @@ def _target_section_kind(block_type, text, level=0, source_section_type=None, bo
         return "no_page"
     if block_type == "heading" and _looks_like_body_start(text):
         return "body"
-    if re.match(r'^(摘要|Abstract|ABSTRACT|目录|Contents)$', (text or "").strip()):
+    if re.match(r'^(摘要|Abstract|ABSTRACT)$', (text or "").strip()):
         return "front"
     return None
 
@@ -623,7 +639,6 @@ def _ensure_output_section(doc, kind):
     doc.add_section(WD_SECTION.NEW_PAGE)
     doc._yu_works_section_kinds.append(kind)
     doc._yu_works_current_section_has_content = False
-    doc._yu_works_suppress_next_heading_page_break = True
     if kind == "body":
         doc._yu_works_body_section_started = True
     elif kind == "front":
@@ -697,25 +712,15 @@ def _set_section_page_numbering(doc):
         prev_kind = kind
 
 
-def reformat_docx(input_file, output_file, config=None):
-    """
-    重排版已有 Word 文档的入口（三层架构版）
-
-    Layer 1: 静态封面/目录注入
-    Layer 2: 模板样式 DNA 克隆
-    Layer 3: 底层硬编码兜底
-    """
+def reformat_docx(input_file, output_file):
+    """重排版已有 Word 文档；目录区域会被跳过，留待 Word/WPS 生成。"""
     import copy
     from analyzer.change_tracker import ChangeTracker
     from core.formula_stats import FormulaRuleStats
     tracker = ChangeTracker()
     formula_stats = FormulaRuleStats()
 
-    if config is None:
-        from template_config import TemplateConfig
-        config = TemplateConfig()
-
-    # ── Layer 0: 免疫清洗 ──
+    # ── 文档清洗 ──
     if input_file.lower().endswith('.docx'):
         from sanitize import sanitize_docx
         input_file = sanitize_docx(input_file)
@@ -733,21 +738,9 @@ def reformat_docx(input_file, output_file, config=None):
             paragraph_index=-1, success=True
         )
 
-    # ── Layer 2 / Layer 3: 完美底座构建 ──
-    if config.layer_mode == 2:
-        from style_shell import create_empty_shell, create_hybrid_shell
-        if config.cover_path:
-            dst = create_hybrid_shell(config.cover_path, config.template_path)
-        else:
-            dst = create_empty_shell(config.template_path)
-    else:
-        if config.cover_path:
-            # 直接把封面文档作为底座打开，图片/样式 100% 保留
-            dst = Document(config.cover_path)
-            dst.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-        else:
-            dst = Document()
-            _add_cover_page(dst, title="")
+    dst = Document()
+    dst._yu_works_section_kinds = ["body"]
+    dst._yu_works_current_section_has_content = False
 
     # ── 文档结构分析 ──
     from analyzer.doc_tree import DocTree
@@ -779,8 +772,9 @@ def reformat_docx(input_file, output_file, config=None):
     # O(1) 段落索引映射（替代 O(N²) 线性查找）
     para_to_idx = {p._element: i for i, p in enumerate(src.paragraphs)}
 
-        # ── Stage 1: Parser ──
+    # ── Stage 1: Parser ──
     raw_ir_stream = []
+    current_section_type = "body"
     for child in src._body._body:
         if child.tag.endswith('p'):
             para_idx = para_to_idx.get(child)
@@ -789,8 +783,9 @@ def reformat_docx(input_file, output_file, config=None):
             para = src.paragraphs[para_idx]
             text = para.text.strip()
             section_type = doc_tree.get_section_for_paragraph(para_idx)
+            current_section_type = section_type
 
-            if config.cover_path and section_type in ('cover','toc','abstract_cn','abstract_en','pre_body'):
+            if section_type == 'toc':
                 continue
 
             if _para_has_image(para):
@@ -844,9 +839,13 @@ def reformat_docx(input_file, output_file, config=None):
                 level=level or lvl, source_para=para, meta=meta))
 
         elif child.tag.endswith('tbl'):
+            if current_section_type == 'toc':
+                continue
             new_tbl = copy.deepcopy(child)
             _copy_image_relationships(new_tbl)
-            raw_ir_stream.append(DocIRBlock(type='table', section_type='body', source_element=new_tbl))
+            raw_ir_stream.append(DocIRBlock(
+                type='table', section_type=current_section_type,
+                source_element=new_tbl))
 
     # ── Stage 2: IR Optimizer ──
     optimized_ir_stream = []
@@ -917,9 +916,8 @@ def reformat_docx(input_file, output_file, config=None):
             dst._yu_works_current_section_has_content = True
 
         elif block.type == 'heading':
-            render_cfg = config if config.layer_mode == 2 else scene_cfg
             hp = _add_heading(dst, block.text, block.level, source_para=block.source_para,
-                              config=render_cfg, global_stats=formula_stats, para_idx=-1)
+                              config=scene_cfg, global_stats=formula_stats, para_idx=-1)
             if 'num_info' in block.meta and block.meta['num_info'] and num_maps:
                 num_id, ilvl = block.meta['num_info']
                 lvl_def = _find_numbering_lvl(num_maps, num_id, ilvl)
@@ -939,20 +937,17 @@ def reformat_docx(input_file, output_file, config=None):
         elif block.type == 'list':
             step = _cfg('normal', 'left_indent_cm', 0.85)
             tl = Cm(step + block.level * step)
-            render_cfg = config if config.layer_mode == 2 else scene_cfg
             _add_body(dst, block.text, left_indent=tl, first_line_indent=Cm(-step),
-                      source_para=block.source_para, config=render_cfg, global_stats=formula_stats, para_idx=-1)
+                      source_para=block.source_para, config=scene_cfg, global_stats=formula_stats, para_idx=-1)
 
         elif block.type == 'caption':
-            render_cfg = config if config.layer_mode == 2 else scene_cfg
-            pn = _add_body(dst, block.text, source_para=block.source_para, config=render_cfg, global_stats=formula_stats, para_idx=-1)
+            pn = _add_body(dst, block.text, source_para=block.source_para, config=scene_cfg, global_stats=formula_stats, para_idx=-1)
             _apply_caption_style(pn, scene_cfg)
 
         elif block.type == 'reference':
             ref_left = _cfg('references_body', 'left_indent_cm', 0.74)
             ref_hang = _cfg('references_body', 'hanging_indent_cm', 0.74)
-            render_cfg = config if config.layer_mode == 2 else scene_cfg
-            _add_body(dst, block.text, source_para=block.source_para, config=render_cfg,
+            _add_body(dst, block.text, source_para=block.source_para, config=scene_cfg,
                       left_indent=Cm(ref_left), first_line_indent=Cm(-ref_hang),
                       section_type='references', global_stats=formula_stats, para_idx=-1)
 
@@ -970,9 +965,8 @@ def reformat_docx(input_file, output_file, config=None):
             if block.section_type == 'references':
                 cl = Cm(_cfg('references_body', 'left_indent_cm', 0.85))
                 cf = Cm(-_cfg('references_body', 'hanging_indent_cm', 0.85))
-            elif block.section_type in ('toc','cover'): cf = Cm(0)
-            render_cfg = config if config.layer_mode == 2 else scene_cfg
-            _add_body(dst, block.text, source_para=block.source_para, config=render_cfg,
+            elif block.section_type == 'cover': cf = Cm(0)
+            _add_body(dst, block.text, source_para=block.source_para, config=scene_cfg,
                       left_indent=cl, first_line_indent=cf,
                       section_type=block.section_type, global_stats=formula_stats, para_idx=-1)
 
@@ -1032,7 +1026,7 @@ def reformat_docx(input_file, output_file, config=None):
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     print("=========================================")
-    print(" Yu_Works - 全能 AI 格式排版引擎已启动")
+    print(" Yu_Works - 基础格式排版引擎已启动")
     print("=========================================")
     if len(sys.argv) >= 3:
         input_file, output_file = sys.argv[1], sys.argv[2]

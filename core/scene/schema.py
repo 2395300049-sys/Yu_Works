@@ -62,15 +62,21 @@ class SceneConfig:
     styles: dict[str, StyleConfig] = field(default_factory=lambda: {
         "normal": StyleConfig(),
         "heading1": StyleConfig(
-            font_cn="黑体", font_en="Arial", size_pt=16.0, bold=True,
-            first_line_indent_cm=0.0, space_before_pt=10.0,
-            space_after_pt=10.0, alignment="center"),
+            font_cn="黑体", font_en="Times New Roman", size_pt=15.0,
+            bold=False, first_line_indent_cm=0.0,
+            space_before_pt=40.0, space_after_pt=20.0,
+            alignment="center", keep_with_next=True,
+            page_break_before=True),
         "heading2": StyleConfig(
-            font_cn="黑体", font_en="Arial", size_pt=14.0, bold=True,
-            first_line_indent_cm=0.0, space_before_pt=6.0, space_after_pt=6.0),
+            font_cn="黑体", font_en="Times New Roman", size_pt=14.0,
+            bold=False, first_line_indent_cm=0.0,
+            space_before_pt=24.0, space_after_pt=6.0,
+            keep_with_next=True),
         "heading3": StyleConfig(
-            font_cn="黑体", font_en="Arial", size_pt=12.0, bold=True,
-            first_line_indent_cm=0.0, space_before_pt=4.0, space_after_pt=4.0),
+            font_cn="黑体", font_en="Times New Roman", size_pt=12.0,
+            bold=False, first_line_indent_cm=0.0,
+            space_before_pt=12.0, space_after_pt=6.0,
+            keep_with_next=True),
         "code_block": StyleConfig(
             font_en="Consolas", size_pt=11.0, first_line_indent_cm=0.0,
             line_spacing_pt=20.0, alignment="left"),

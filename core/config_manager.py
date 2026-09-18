@@ -1,37 +1,66 @@
-"""Yu_Works 统一配置持久化中心"""
-import os
+"""Yu_Works 基础排版配置。
+
+2.0 精简版只保存一级至三级标题的可视化设置。旧版的 AI、模板克隆、
+自定义模式和供应商密钥不会再读取或迁移。
+"""
+
+from __future__ import annotations
+
+import copy
 import json
+import os
 from pathlib import Path
 
-_CONFIG_PATH = Path.home() / ".yu_works_ai_config.json"
+
+_CONFIG_PATH = Path.home() / ".yu_works_config.json"
+
+
+DEFAULT_HEADING_SETTINGS = {
+    "1": {
+        "font_cn": "黑体",
+        "size_pt": 15.0,
+        "space_before_pt": 40.0,
+        "space_after_pt": 20.0,
+        "center": True,
+    },
+    "2": {
+        "font_cn": "黑体",
+        "size_pt": 14.0,
+        "space_before_pt": 24.0,
+        "space_after_pt": 6.0,
+        "center": False,
+    },
+    "3": {
+        "font_cn": "黑体",
+        "size_pt": 12.0,
+        "space_before_pt": 12.0,
+        "space_after_pt": 6.0,
+        "center": False,
+    },
+}
 
 
 def load_full_config() -> dict:
     if not _CONFIG_PATH.exists():
         return {}
     try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-            return json.load(f)
-    except Exception:
-        try:
-            bak = _CONFIG_PATH.with_suffix(".bak")
-            if _CONFIG_PATH.exists():
-                os.rename(_CONFIG_PATH, bak)
-        except Exception:
-            pass
+        with _CONFIG_PATH.open("r", encoding="utf-8-sig") as stream:
+            data = json.load(stream)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
         return {}
 
 
-def save_full_config(config_dict: dict):
-    try:
-        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(config_dict, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+def save_full_config(config_dict: dict) -> None:
+    """原子保存配置，避免程序异常退出时留下半个 JSON 文件。"""
+    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = _CONFIG_PATH.with_suffix(".tmp")
+    with temp_path.open("w", encoding="utf-8") as stream:
+        json.dump(config_dict, stream, ensure_ascii=False, indent=2)
+    os.replace(temp_path, _CONFIG_PATH)
 
 
-def update_config(key_or_dict, value=None):
-    """原子化增量更新：替代原 settings_dialog 的 _write_config_safe"""
+def update_config(key_or_dict, value=None) -> None:
     data = load_full_config()
     if isinstance(key_or_dict, dict):
         data.update(key_or_dict)
@@ -40,81 +69,82 @@ def update_config(key_or_dict, value=None):
     save_full_config(data)
 
 
-def get_active_model_settings() -> dict:
-    cfg = load_full_config()
-    active_prov = cfg.get("active_provider", "deepseek")
-    prov_data = cfg.get("providers", {}).get(active_prov, {})
-
-    return {
-        "provider_id": active_prov,
-        "base_url": prov_data.get("base_url", cfg.get("base_url", "https://api.deepseek.com")),
-        "api_key": prov_data.get("api_key", cfg.get("api_key", "")),
-        "api_type": prov_data.get("api_type", cfg.get("api_type", "openai-completions")),
-        "model": cfg.get("active_model", cfg.get("model", "deepseek-chat"))
-    }
+def _number(value, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(maximum, max(minimum, result))
 
 
-_PRESET_FILE_MAP = {
-    "严格学位论文规范": "thesis_strict",
-    "默认通用格式": "default_format",
-    "学术毕业论文规范": "thesis_format",
-    "IEEE Conference": "ieee_conference",
-}
+def normalize_heading_settings(settings: dict | None) -> dict:
+    """只接受界面公开的标题字段，并限制异常数值。"""
+    incoming = settings if isinstance(settings, dict) else {}
+    normalized = copy.deepcopy(DEFAULT_HEADING_SETTINGS)
+    for level in ("1", "2", "3"):
+        source = incoming.get(level, {})
+        if not isinstance(source, dict):
+            continue
+        default = DEFAULT_HEADING_SETTINGS[level]
+        font_cn = str(source.get("font_cn", default["font_cn"])).strip()
+        normalized[level] = {
+            "font_cn": font_cn or default["font_cn"],
+            "size_pt": _number(
+                source.get("size_pt"), default=default["size_pt"],
+                minimum=8.0, maximum=72.0,
+            ),
+            "space_before_pt": _number(
+                source.get("space_before_pt"), default=default["space_before_pt"],
+                minimum=0.0, maximum=200.0,
+            ),
+            "space_after_pt": _number(
+                source.get("space_after_pt"), default=default["space_after_pt"],
+                minimum=0.0, maximum=200.0,
+            ),
+            "center": bool(source.get("center", default["center"])),
+        }
+    return normalized
 
 
-def _resolve_preset_path(filename: str):
-    import sys
-    from pathlib import Path
-    if hasattr(sys, '_MEIPASS'):
-        base = Path(sys._MEIPASS)
-    else:
-        base = Path(__file__).resolve().parent.parent
-    return base / 'presets' / filename
+def get_heading_settings() -> dict:
+    return normalize_heading_settings(load_full_config().get("heading_settings"))
+
+
+def save_heading_settings(settings: dict) -> dict:
+    normalized = normalize_heading_settings(settings)
+    save_full_config({"heading_settings": normalized})
+    return normalized
 
 
 def get_active_scene_config():
-    cfg = load_full_config()
-
-    if cfg.get("typography_mode") == "clone":
-        target_path = cfg.get("clone_target_path")
-        if target_path:
-            import os as _os
-            if _os.path.exists(target_path):
-                from core.clone_engine.api import create_scene_from_clone
-                return create_scene_from_clone(target_path)
-
+    """加载唯一的基础排版预设，再覆盖界面中的三级标题设置。"""
     from core.scene.manager import load_scene_config
-    preset_name = cfg.get("format_preset", "严格学位论文规范")
-    filename = _PRESET_FILE_MAP.get(preset_name, "default_format")
 
-    preset_path = _resolve_preset_path(f"{filename}.json")
-    if preset_path.exists():
-        scene_cfg = load_scene_config(preset_path)
-    else:
-        from core.scene.schema import SceneConfig
-        scene_cfg = SceneConfig()
+    preset_path = _resolve_preset_path("thesis_strict.json")
+    scene_cfg = load_scene_config(preset_path)
+    heading_settings = get_heading_settings()
 
-    _TABLE_OVERLAY_FIELDS = [
-        "normal_table_border_mode", "table_border_width_pt",
-        "three_line_header_width_pt", "three_line_bottom_width_pt",
-        "normal_table_layout_mode", "normal_table_smart_levels",
-        "normal_table_line_spacing_mode", "normal_table_repeat_header",
-        "normal_table_cant_split_rows", "table_text_font_cn",
-        "table_text_font_en", "table_text_size_pt",
-        "table_text_alignment", "table_number_alignment",
-    ]
-    for field in _TABLE_OVERLAY_FIELDS:
-        if field in cfg:
-            setattr(scene_cfg, field, cfg[field])
+    for level in ("1", "2", "3"):
+        style = scene_cfg.styles[f"heading{level}"]
+        values = heading_settings[level]
+        style.font_cn = values["font_cn"]
+        style.size_pt = values["size_pt"]
+        style.space_before_pt = values["space_before_pt"]
+        style.space_after_pt = values["space_after_pt"]
+        style.alignment = "center" if values["center"] else "left"
+        style.first_line_indent_cm = 0.0
+        style.keep_with_next = True
 
-    if cfg.get("typography_mode") == "custom":
-        custom = cfg.get("custom_settings", {})
-        normal_style = scene_cfg.styles["normal"]
-        if "indent_cm" in custom:
-            normal_style.first_line_indent_cm = float(custom["indent_cm"])
-        if "line_mode" in custom:
-            normal_style.line_spacing_mode = custom["line_mode"]
-        if "line_pt" in custom:
-            normal_style.line_spacing_pt = float(custom["line_pt"])
-
+    # 一级标题的段前分页是基础版固定规则，不允许旧配置关闭。
+    scene_cfg.styles["heading1"].page_break_before = True
     return scene_cfg
+
+
+def _resolve_preset_path(filename: str) -> Path:
+    import sys
+
+    if hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).resolve().parent.parent
+    return base / "presets" / filename
