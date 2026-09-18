@@ -147,6 +147,17 @@ class BasicFormattingTests(unittest.TestCase):
         number_run = next(run for run in number.runs if '(1)' in run.text)
         fonts = number_run._r.get_or_add_rPr().find(qn('w:rFonts'))
         self.assertEqual(fonts.get(qn('w:ascii')), "Times New Roman")
+        math_runs = table._tbl.findall('.//' + qn('m:r'))
+        latin_math_runs = [
+            run for run in math_runs
+            if any(ch.isascii() and ch.isalnum() for ch in ''.join(
+                node.text or '' for node in run.findall('.//' + qn('m:t'))
+            ))
+        ]
+        self.assertTrue(latin_math_runs)
+        for math_run in latin_math_runs:
+            math_fonts = math_run.find(qn('w:rPr')).find(qn('w:rFonts'))
+            self.assertEqual(math_fonts.get(qn('w:ascii')), "Times New Roman")
 
     def test_abstract_titles_keywords_and_western_font_rules(self):
         output = Path(self.temp_dir.name) / "abstract.docx"

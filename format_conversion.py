@@ -654,6 +654,26 @@ def _enforce_times_new_roman(doc):
             fonts.set(qn('w:hAnsi'), 'Times New Roman')
             fonts.set(qn('w:cs'), 'Times New Roman')
 
+        for math_run in root.iter(f'{{{_M_NS}}}r'):
+            text = ''.join(
+                node.text or '' for node in math_run.iter(f'{{{_M_NS}}}t')
+            )
+            if not re.search(r'[A-Za-z0-9]', text):
+                continue
+            word_rpr = math_run.find(qn('w:rPr'))
+            if word_rpr is None:
+                word_rpr = OxmlElement('w:rPr')
+                math_rpr = math_run.find(f'{{{_M_NS}}}rPr')
+                insert_at = list(math_run).index(math_rpr) + 1 if math_rpr is not None else 0
+                math_run.insert(insert_at, word_rpr)
+            fonts = word_rpr.find(qn('w:rFonts'))
+            if fonts is None:
+                fonts = OxmlElement('w:rFonts')
+                word_rpr.insert(0, fonts)
+            fonts.set(qn('w:ascii'), 'Times New Roman')
+            fonts.set(qn('w:hAnsi'), 'Times New Roman')
+            fonts.set(qn('w:cs'), 'Times New Roman')
+
 
 def _format_native_omml_paragraph(paragraph_el, config=None):
     """居中原生 OMML；若同段带编号，则以右制表位贴齐版心右侧。"""
